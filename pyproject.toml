@@ -1,0 +1,19 @@
+[project]
+name = "ncu_salsa_rt4"
+version = "0.1.0"
+description = "A set of tools for managing spectral data from autocorrelator"
+authors = [
+    { name="Michał Durjasz", email="md@astro.umk.pl" }
+]
+requires-python = ">=3.8"
+dependencies = [
+    "mpmath",
+    "astropy",
+    "barycorrpy",
+    "validators",
+    "numpy",
+    "pytest"
+]
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
