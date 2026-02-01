@@ -3,11 +3,11 @@ Module: ncu_salsa_rt4.scan_set
 Creation date: 2026-02-01
 Owner: Michał Durjasz
 """
-
 import tarfile
 from astropy.coordinates import SkyCoord, FK5
 import astropy.units as u
 import numpy as np
+from concurrent.futures import ThreadPoolExecutor
 from .scan import Scan
 from .scan_merged import MergedScan
 import os
@@ -36,7 +36,8 @@ class ScanSet:
 
     def __process_data(self):
         self.noOfScans = len(self.scans)
-        self.proceed_scans()
+        self.scans = self.proceed_scans_sequential()
+        # self.scans = self.proceed_scans()
         self.mergedScans: list[MergedScan] = self.merge_scans(self.scans)
         self.mjd = self.__calculate_mjd()
 
@@ -89,27 +90,50 @@ class ScanSet:
         self.source_bd = int(self.source_B)
         self.source_bm = int(60.0 * (self.source_B % 1))
 
+    def _process_single_scan(self, scan, source_J2000, latitude_deg, longitude_deg, height_m_asl, debug, i):
+        # processing position
+        frame_now = FK5(equinox="J" + str(scan.decimalyear))
+        source_JNOW = source_J2000.transform_to(frame_now)
+        source_JNOW_RA = (source_JNOW.ra * u.degree).value
+        source_JNOW_DEC = (source_JNOW.dec * u.degree).value
+        # signal processing
+        scan.correct_auto(scannr=i + 1)
+        scan.hanning_smooth()
+        scan.doppset(source_JNOW_RA, source_JNOW_DEC, latitude_deg, longitude_deg, height_m_asl)
+        if debug:
+            print("-----> scan %d: line rotated by %4.3f channels" % (i + 1, round(scan.fcBBC[0], 3)))
+        scan.do_statistics()
+        scan.scale_tsys_to_mK()
+        scan.make_transformata_furiata()
+        scan.calibrate_in_tsys()
+        return scan
+
     def proceed_scans(self):
+        with ThreadPoolExecutor() as executor:
+            results = list(executor.map(
+                self._process_single_scan,
+                self.scans,
+                [self.source_J2000] * len(self.scans),
+                [self.latitude_deg] * len(self.scans),
+                [self.longitude_deg] * len(self.scans),
+                [self.height_m_asl] * len(self.scans),
+                [self.debug] * len(self.scans),
+                range(len(self.scans))
+            ))
+        return results
+
+    def proceed_scans_sequential(self):
         for i in range(len(self.scans)):
-            # precession
-            frame_now = FK5(equinox="J" + str(self.scans[i].decimalyear))
-            source_JNOW = self.source_J2000.transform_to(frame_now)
-            source_JNOW_RA = (source_JNOW.ra * u.degree).value
-            source_JNOW_DEC = (source_JNOW.dec * u.degree).value
-            # acf correction
-            self.scans[i].correct_auto(scannr=i + 1)
-            # hanning smoothing
-            self.scans[i].hanning_smooth()
-            # correction for earth motion
-            self.scans[i].doppset(source_JNOW_RA, source_JNOW_DEC, self.latitude_deg, self.longitude_deg, self.height_m_asl)
-            if self.debug:
-                print("-----> scan %d: line rotated by %4.3f channels" % (i + 1, round(self.scans[i].fcBBC[0], 3)))
-            self.scans[i].do_statistics() # calculating statistics
-            self.scans[i].scale_tsys_to_mK() # scaling tsys to mK
-            self.scans[i].make_transformata_furiata() # fourier transform
-            self.scans[i].calibrate_in_tsys() # calibration in tsys
-        if self.debug:
-            print("-----------------------------------------")
+            self.scans[i] = self._process_single_scan(
+                self.scans[i],
+                self.source_J2000,
+                self.latitude_deg,
+                self.longitude_deg,
+                self.height_m_asl,
+                self.debug,
+                i
+            )
+        return self.scans
 
     def merge_scans(self, scans):
         return [MergedScan(scans[i], scans[i + 1]) for i in range(0, int(self.noOfScans), 2)]
