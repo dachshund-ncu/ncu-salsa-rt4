@@ -49,7 +49,7 @@ class MergedScan:
         """
         bbc_index = bbc - 1
         channels = np.linspace(1, self.number_of_channels, self.number_of_channels).astype(int)
-        indices = np.full(self.pols.shape[0], False)
+        indices = np.full(self.pols.shape[1], False)
         for singular_range in ranges:
             indices_tmp = np.logical_and(channels >= singular_range[0], channels <= singular_range[1])
             indices = np.logical_or(indices, indices_tmp)
