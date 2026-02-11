@@ -497,7 +497,7 @@ class Scan:
         self.ACF0 = self.r0
         self.V_sigma = zeros(4)
         for i in range(len(self.auto)):
-            self.V_sigma[i] = self.__clipLevel(self.r0[i])
+            self.V_sigma[i] = self.__clip_level(self.r0[i])
 
     def scale_tsys_to_mK(self) -> None:
         """
@@ -593,30 +593,29 @@ class Scan:
         v_sun = v_sun_0 * (sin(sun_dec_now_rad) * sdec + cos(sun_dec_now_rad) * cdec * cos(target_ra_rad - sun_ra_now_rad))
         return v_sun
 
-    # -- metoda: correctACF --
-    # nakłada na funkcję autokorelacji krektę na 2 i 3 - poziomową kwantyzację
-    # przyjmuje w argumencie pojedynczy punkt
-    def __correctACF(self, autof, r0, rMean):
-        '''
-        Oblicza korekcję do funkcji autokorelacji dla kilku przypadków
-        3- i 2- poziomowego autokorelatora
-        autof - funkcja autokorelacji (jeden punkt dokładnie)
-        r0 - współczynnik korelacji dla zerowego zapóźnienia
-        bias0 - średni współczynnik dla ogona funkcji autokorelacji (większe zapóźnienia)
 
-        Ta metoda jest w całości przeportowana z programu A2S, który jest napisany w języku Fortran77 przez K. Borkowskiego
-        '''
-        if rMean <= 1e-5:
-            # -- limituemy funkcję autokorelacji między 0 i 1
-            # tak powinna być znormalizowana (1 w zerowym zapóźnieniu)
+    def __correctACF(
+            self,
+            autof: float,
+            r0: float,
+            r_mean: float) -> float:
+        """
+        Calculate correction to the autocorrelation function for several cases of 3- and 2-level autocorrelator
+        This method is 1 to 1 ported from K. Borkowski's A2S program, which is written in Fortran77
+        :param autof: acf. function point
+        :param r0: correlation coefficient for zero delay
+        :param r_mean: mean coefficient for the tail of the acf function (higher delays)
+        :return: corrected acf function point
+        """
+
+        if r_mean <= 1e-5:
             r = min([1.0, abs(autof)])
             if r0 > 0 and r0 < 0.3:
-                r = r * 0.0574331  # tak jest w a2s
+                r = r * 0.0574331
                 rho = r * (60.50861 + r * (-1711.23607 + r * (26305.13517 - r * 167213.89458))) / 0.99462695104383
                 correct_auto = copysign(rho, autof)
                 return correct_auto
             elif r0 > 0.3 and r0 < 0.9:
-                # trzypoziomoy autokorelator
                 r = r * 0.548506
                 rho = (r * (2.214 + r * (0.85701 + r * (-7.67838 + r * (22.42186 - r * 24.896))))) / 0.998609598617374
                 correct_auto = copysign(rho, autof)
@@ -635,7 +634,7 @@ class Scan:
                 d = 0.01573239969731158 - 0.06572872697836053 * fac
                 correct_auto = a + (b + (c + d * autof2) * autof2) * autof
                 return correct_auto
-            elif (autof > 0.5):
+            elif autof > 0.5:
                 correct_auto = -1.1568973833585783 + 10.27012449073475 * autof - 27.537554958512125 * autof2 + 40.54762923890069 * autof ** 3 - 28.758995213769058 * autof2 ** 2 + 7.635693826008257 * autof ** 5 + 0.218044850 * (
                             0.53080867 - r0) * cos(3.12416 * (autof - 0.49721))
                 return correct_auto
@@ -646,26 +645,39 @@ class Scan:
                                            0.53080867 - r0) * cos(3.11635 * (autof - 0.49595))
                 return correct_auto
 
-    # -- metoda: Clip level --
-    # -- skopiowana z oryginalnego A2S --
-    def __clipLevel(self, ratio):
-        Err = 1 - ratio
+    def __clip_level(
+            self,
+            ratio: float) -> float | None:
+        """
+        Clip_level method
+        copied from original A2S program
+        :param ratio:  ???
+        :return: corrected clip level
+        """
+        err = 1 - ratio
         x = 0
         for i in range(100):
             dE = self.__erf(x + 0.01) - self.__erf(x)
             if dE == 0.0:
                 return inf
-            x = x + (Err - self.__erf(x)) * 0.01 / dE
-            if abs(Err - self.__erf(x)) < 0.0001:
+            x = x + (err - self.__erf(x)) * 0.01 / dE
+            if abs(err - self.__erf(x)) < 0.0001:
                 return sqrt(2.0) * x
             else:
                 continue
+        return None
 
-    # -- pomocnicza metoda do Clip Level --
-    def __erf(self, x):
+
+    def __erf(
+            self,
+            x: float) -> float:
+        """
+        clip_level helper method
+        :param x:
+        :return:
+        """
         t = 1.0 / (1 + 0.3275911 * x)
         erf = 1.0 - t * (
                     0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429)))) * exp(
             -x ** 2)
         return erf
-    # ----------------------------------
