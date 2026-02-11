@@ -17,7 +17,7 @@ from astropy.coordinates import SkyCoord, FK5
 import astropy.units as u
 from sys import exit
 import barycorrpy
-
+from datetime import datetime
 
 class Scan:
     def __init__(self, filename, onOFF=False):
@@ -165,7 +165,7 @@ class Scan:
         self.day = float(tmp[5])
 
         # -- rest of date - adjust date format to match ISO 8601 standard --
-        self.isotime = self._format_time_to_iso_8601()
+        self.isotime = self._format_time_to_iso_8601_new()
 
         # -- calculate time using astropy time --
         self.tee = Time(self.isotime, format="isot", scale="utc")
@@ -289,9 +289,23 @@ class Scan:
             isotime = isotime + str(int(self.UTs))
         return isotime
 
+    def _format_time_to_iso_8601_new(self) -> str:
+        microsecond = int((self.UTs % 1) * 1_000_000)
+        dt = datetime(
+            int(self.year),
+            int(self.month),
+            int(self.day),
+            int(self.UTh),
+            int(self.UTm),
+            int(self.UTs),
+            microsecond
+        )
+        return dt.isoformat()
+
     def correct_auto(self) -> None:
         """
         This method is responsible for correcting the autocorrelation function
+        This place takes significant amount of time (~ 1/3 of the overall processing time)
         :return: None
         """
         # -- declarations --
@@ -303,61 +317,57 @@ class Scan:
         self.zero_lag_auto = zeros(4)
         self.r0 = zeros(4)
 
-        # pętla po BBC do korekcji funkcji autokorelacji
+        # -- loop for ACF correction --
         for i in range(len(self.auto)):
-            # średnia z ostatnich 240 kanałów
+            # average last 240 channels - crucial for statistical estimations
             self.average[i] = mean(self.auto[i][3857:])
 
-            # tabliza z wartościami z pierwszych kanałów
-            # pierwszy kanał na każdym BBC nie jest częścią
-            # funkcji autokorelacji
+            # table with first values
+            # in loaded data, first value is not part
+            # of the ACF function
             self.auto0tab[i] = self.auto[i][0]
 
-            # obliczamy prawdziwą ilość "samples accumulated"
-            # i zabezpieczamy się przed dzieleniem przez zero
-            if self.average[i] == 0.0:
+            # calculate real amount of "samples accumulated"
+            if self.average[i] == 0.0: # 0 division failsafe
                 self.multiple[i] = 0
             else:
                 self.multiple[i] = int(nint(self.auto0tab[i] / self.average[i]))
 
-            # liczymy Nmax
-            # i zabezpieczamy się przed dzieleniem przez zero
-            if self.multiple[i] == 0:
+            # calculate Nmax - the maximum number of samples that could be accumulated in the ACF function
+            if self.multiple[i] == 0: # 0 division failsafe
                 self.Nmax[i] = 0
             else:
                 self.Nmax[i] = int(self.auto0tab[i] / self.multiple[i])
 
-            # liczymy bias
-            # i zabezpieczamy się przed dzieleniem przez zero
-            if self.Nmax[i] == 0:
+            # calculate bias
+            if self.Nmax[i] == 0: # 0 division failsafe
                 self.bias0[i] = 0.0
             else:
                 self.bias0[i] = self.average[i] / self.Nmax[i] - 1
 
-            # pozbywamy się intencjonalnego biasu z funkcji autokorelacji
-            self.auto[i] = self.auto[i] - self.Nmax[i]
+            # subtract the bias from the ACF function
+            self.auto[i] -= self.Nmax[i]
 
-            # gromadzimy informacje na temat "zero lag autocorrelation"
+            # gather << zero_lag_acf >> - value of the ACF function for tau = 0 (zero delay,
+            # should be the highest point of the ACF function)
             self.zero_lag_auto[i] = self.auto[i][1]
 
-            # liczymy r0 (do statystyk, chyba nie będzie później używane)
-            # i zabezpieczamy się przed dzieleniem przez zero
-            if self.Nmax[i] == 0:
+            # calculate r0
+            if self.Nmax[i] == 0: # 0 division failsafe
                 self.r0[i] = 0.0
             else:
                 self.r0[i] = self.zero_lag_auto[i] / self.Nmax[i]
 
-            # normalizujemy całą funkcję autokorelacji
-            # i zabezpieczamy się przed dzieleniem przez 0
+            # normalize the ACF function to zero lag value
             if self.zero_lag_auto[i] == 0.0:
-                self.auto[i] = zeros(len(self.auto[i]))
+                self.auto[i] = zeros(len(self.auto[i])) # 0 division failsafe
             else:
                 self.auto[i] = self.auto[i] / self.zero_lag_auto[i]
 
-            # teraz korekcja na kwantyzację sygnału
-            # punkt po punkcie
+            # quantization correction - correct the ACF function for 2- and 3-level quantization
+            # this approach is rather slow, needs to be rewritten
             for j in range(len(self.auto[i])):
-                # by uniknąć "nan"
+                # to avoid nans and infs, we check the value of the correction before applying it
                 tmp_number = self.__correctACF(self.auto[i][j], self.r0[i], self.bias0[i])
                 if tmp_number is None:
                     self.auto[i][j] = 0.0
@@ -365,7 +375,9 @@ class Scan:
                     self.auto[i][j] = tmp_number
 
     def hanning_smooth(self):
-        # wygładzamy funkcję autokorelacji
+        """
+        Applies Hanning smoothing to the ACF function
+        """
         for i in range(len(self.auto)):
             for j in range(1, len(self.auto[i]), 1):
                 cosine = cos(pi * (j - 1) / self.NN) ** 2.0

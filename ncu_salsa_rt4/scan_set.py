@@ -67,7 +67,7 @@ class ScanSet:
         Here we perform a set of initial settings, needed for further processing
         """
         # CONSTANTS
-        # Piwnice 32 m radio telescop - location
+        # Piwnice 32 m radio telescope - location
         self.longitude_deg = 18.56406  # deg
         self.latitude_deg = 53.09546  # deg
         self.height_m_asl = 133.61  # meters above sea level
