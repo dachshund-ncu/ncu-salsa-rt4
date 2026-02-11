@@ -104,7 +104,7 @@ class ScanSet:
             print("-----> scan %d: line rotated by %4.3f channels" % (i + 1, round(scan.fcBBC[0], 3)))
         scan.do_statistics()
         scan.scale_tsys_to_mK()
-        scan.make_transformata_furiata()
+        scan.perform_fourier_transform()
         scan.calibrate_in_tsys()
         return scan
 

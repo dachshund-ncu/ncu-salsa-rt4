@@ -168,10 +168,10 @@ class Scan:
         self.isotime = self._format_time_to_iso_8601_new()
 
         # -- calculate time using astropy time --
-        self.tee = Time(self.isotime, format="isot", scale="utc")
-        self.decimalyear = self.tee.decimalyear
-        self.jd = self.tee.jd
-        self.mjd = self.tee.mjd
+        self.time_of_observation = Time(self.isotime, format="isot", scale="utc")
+        self.decimalyear = self.time_of_observation.decimalyear
+        self.jd = self.time_of_observation.jd
+        self.mjd = self.time_of_observation.mjd
 
         # -- create << datestring >> for saving in file --
         self.datestring = self._create_datestring()
@@ -383,154 +383,162 @@ class Scan:
                 cosine = cos(pi * (j - 1) / self.NN) ** 2.0
                 self.auto[i][j] = self.auto[i][j] * cosine
 
-    # argumenty: RA po prrecesji(decimal h), DEC po precesji (decimal deg), szerokość geograficzna(decimal deg), długość geograficzna(decimal deg), wysokość nad geoidą (m)
-    def doppset(self, source_JNOW_RA, source_JNOW_DEC, szer_geog, dl_geog, height):
-        # -------------- PRĘDKOŚCI --------------------
-        # -- liczymy prędkość wokół barycentrum + rotacja wokół własnej osi --
-        # rzutowane na źródło
-        # metoda wykonuje precesję sama z siebie, toteż podajemy współrzędne na epokę 2000 przed precesją
-        '''
-        OBSOLETE:
-        #self.baryvel, hjd = helcorr(obs_long = dl_geog, obs_lat = szer_geog, obs_alt = height, ra2000 = self.RA*15, dec2000 = self.DEC, jd=self.tee.jd) #self.tee to obiekt czasu (astropy.time)
-        05.06.2022: we stopped using HELCORR, 'cause it utilizes obsolete doppset method
-        '''
-        bar = barycorrpy.get_BC_vel(self.tee, ra=self.RA * 15, dec=self.DEC, lat=szer_geog, longi=dl_geog, alt=height,
-                                    epoch=2000)
+    def doppset(
+            self,
+            source_ra_now_deg: float,
+            source_dec_now_deg: float,
+            observatory_lattitude: float,
+            observatory_longitude: float,
+            observatory_height_m_asl: float) -> None:
+        """
+        This method calculates doppler shift and rotates the spectrum accordingly
+        :param source_ra_now_deg: right-ascension (after precession corretions applied!) - decimal degrees
+        :param source_dec_now_deg: declination (after precession corrections applied!) - decimal degrees
+        :param observatory_lattitude: observatory lattitude (degrees, float)
+        :param observatory_longitude: observatory longitude
+        :param observatory_height_m_asl: observatory height above sea level
+        :return: None
+        """
+        # -- barycentric velocity of the observatory --
+        # NOTE: we use nominal coordinates here, because barycorrpy performs precession on its own
+        bar = barycorrpy.get_BC_vel(
+            self.time_of_observation,
+            ra=self.RA * 15,
+            dec=self.DEC,
+            lat=observatory_lattitude,
+            longi=observatory_longitude,
+            alt=observatory_height_m_asl,
+            epoch=2000)
         self.baryvel = bar[0][0] / 1000.0
-        # -- liczymy prędkość w lokalnym standardzie odniesienia --
-        # rzutowane na źródło
-        self.lsrvel = self.__lsr_motion(source_JNOW_RA, source_JNOW_DEC, self.decimalyear)
-
-        # -- prędkość dopplerowska to będzie ich suma --
+        # -- velocity in the local standard of the rest - projected into the observation direction --
+        self.lsrvel = self.__lsr_motion(source_ra_now_deg, source_dec_now_deg, self.decimalyear)
+        # -- final velocity for doppler shift calculation --
         self.Vdop = self.baryvel + self.lsrvel
-        # ----------------------------------------------
 
-        # --------------- ROTACJA WIDMA ----------------
-        # sprawdzamy, czy nasze rest jest w tablicy z template
+        # -- rest freq correction --
+        # replace the file rest frequency with values from the standard table (if they match)
         for i in range(len(self.auto)):  # iteracja po indeksach
             for tmp_ind in self.template_restfreqs:  # iteracja po templatkach
-                # - jeśli znajdziemy int(nasza_częstotliwość) w templatce, to zamiast -
-                # - restfreq z pliku używamy tego z templatki -
                 if int(self.rest[i]) == int(tmp_ind):
                     self.rest[i] = tmp_ind
                     break
 
-        # - deklarujemy tablice -
+        # -- doppler shift correction --
+        # -- or so called rotating the spectrum --
+        # declare tables
         self.fvideo = zeros(4)
         self.kanalf = zeros(4, dtype=int64)
         self.q = zeros(4)
         self.kanalv = zeros(4)
 
         # --- rotowanie oryginalnego widma ---
-        # przesuwamy linię na 1/4 wstęgi (1/2 jeśli robimy obserwacje OnOff)
-        if self.isOnOff:
-            self.lo[0] = self.lo[0] - (self.bw[0] / 4)
-        else:
-            self.lo[0] = self.lo[0] - (self.bw[0] / 4)
-        # faktyczna częstotliwość obserwowana
+        # move the emission line to 1 / 4 of the bandwidth
+        self.lo[0] = self.lo[0] - (self.bw[0] / 4)
+        # real observed frequency of the line (after doppler shift)
         self.fsky = self.rest - self.rest * (-self.Vdop + self.vlsr) / self.c
-        # częstotliwość bbc linii widmowej
+        # frequency of the line in the intermediate frequency (IF) domain
         self.f_IF = self.fsky - self.lo[0]
 
-        # krótka pętla licząca
+        # miscellaneous parameters
         self.NNch = len(self.auto[0]) - 1  # faktyczna ilość kanałów
-
         for i in range(len(self.auto)):  # po BBC
             # fvideo
             self.fvideo[i] = self.f_IF[i] - copysign(self.bbcfr[i], self.f_IF[i])
-            # kanalf (linia w domenie częstotliwości)
+            # kanalf (line in frequency domain)
             self.kanalf[i] = int(self.NNch * abs(self.fvideo[i]) / self.bw[i] + 1)
-            # q (położenie linii na wstędze)
+            # q (line position in the spectrum, in channels, with sign)
             if self.fvideo[i] < 0.0:
                 self.kanalf[i] = self.NNch - self.kanalf[i] + 1
                 self.q[i] = (-self.fvideo[i] / self.bw[i])
             else:
                 self.q[i] = 1.0 - self.fvideo[i] / self.bw[i] - 1.0 / self.NNch
 
-        # robimy kanalv
+        # kanalv (line in velocity domain)
         self.kanalv = self.NNch - self.kanalf + 1
-        # prędkość w kanale 1024 w spoektrum częstotliwości
-        if self.isOnOff:
-            targetChan = 1024
-        else:
-            targetChan = 1024
+        # line velocity in frequency domain (???)
+        targetChan = 1024
         self.v1024f = self.vlsr + (targetChan - self.kanalf) * (-self.c * self.bw) / (self.rest * self.NNch)
-        # prędkość w kanale 1024 w spektrum prędkości
+        # velocity in 1024 channel in velocity domain
         self.v1024v = self.vlsr + (targetChan - self.kanalv) * (self.c * self.bw) / (self.rest * self.NNch)
 
-        # ilość kanałów, o które trzeba przerotować widmo
+        # no of channels to rotate
         self.fc = self.q * self.NNch - targetChan
         self.fcBBC = self.fc
 
-        # -- przygotowujemy dane do fft --
+        # -- fft preparation --
         self.fr = - (self.fc + 1) * 2.0 * pi / self.NN
 
-        # -- przygotowujemy tablicę do FFT --
+        # -- FFT table - declare a table to hold data after fourier transform --
         self.auto_prepared_to_fft = zeros((4, self.NN), dtype=complex128)  # docelowa
-        # --- rotujemy funkcję autokorelacji (mnożymy przez exp(sqrt(-1) * self.fr)) --
+
+        # -- spectrum rotation and FFT preparation --
+        # -- rotation is done by multiplying the ACF function by exp(sqrt(-1) * self.fr) --
         for w in range(len(self.auto)):  # iteruje po BBC
+            # calculate phases and rotate spectrum
             phases = linspace(0, int(self.NN / 2) - 1, int(self.NN / 2)) * self.fr[w]  # fazy
             shift_coeffs = exp(math_sqrt(-1) * phases)
-            # shifted auto array
             tmpwp = self.auto[w][1:] * shift_coeffs
+            # prepare the table for fft
             # non-mirror part
             self.auto_prepared_to_fft[w][:int(self.NN / 2)] = tmpwp
             # mirror part
             self.auto_prepared_to_fft[w][int(self.NN / 2) + 1:] = tmpwp[::-1][
                 :-1].conjugate()  # odwracamy znakiem część zespoloną
-
+            # last sample
             self.auto_prepared_to_fft[w][4096] = (0 + 0j)
         # --------------
 
-    # -- liczy kilka parametrów --
-    def do_statistics(self):
-        # liczymy rmean
+    def do_statistics(self) -> None:
+        """
+        Miscelanneous statistics to calculate, not included in other procedures
+        :return: None
+        """
         self.rMean = self.bias0 * 100.0
-
-        # liczymy ACF0
         self.ACF0 = self.r0
-
-        # liczymy niepewności
         self.V_sigma = zeros(4)
         for i in range(len(self.auto)):
             self.V_sigma[i] = self.__clipLevel(self.r0[i])
 
-    # -- skaluje widmo w mili kelwinach --
-    def scale_tsys_to_mK(self):
-        # pętla po 4 bbc
+    def scale_tsys_to_mK(self) -> None:
+        """
+        Scale system temperature to mK, and apply a failsafe for negative values (set them to 1000 K)
+        :return: None
+        """
         for i in range(len(self.auto)):
             self.tsys[i] = self.tsys[i] * 1000.0
             if self.tsys[i] < 0.0:
                 self.tsys[i] = 1000.0 * 1000.0
 
-    def make_transformata_furiata(self):
-
-        # -- wykonujemy transformatę furiata --
-        # deklarujemy tablice, by oszczędzić czas
+    def perform_fourier_transform(self) -> None:
+        """
+        Performs fourier transform on the ACF function, and prepares the final spectrum for further processing
+        """
+        # declare tables to save some time
         self.spectr_bbc = zeros((4, self.NN))
         self.spectr_bbc_final = zeros((4, int(self.NN / 2)))
-        # pętla po BBC
+        # iterate through BBC
         for i in range(len(self.auto)):
-
-            # przywołujemy numpy.fft.fft by policzyć transformatę
             self.spectr_bbc[i] = fft(self.auto_prepared_to_fft[i]).real
-
-            # sprawdzamy, czy należy wziąć widmo dolne czy górne:
-            # to zapewne zależy od lustrzanki (HIGH vs LOW)
-            # najlepwniej zawsze będzie widmo górne brane
-            # jako iż lustrzanka LOW była tylko w spektroskopii L
-            if self.fvideo[i] > 0:  # jak tak, to górne
+            # check to take lower or higher spectrium
+            # it depends on the sign of fvideo - if it's positive, we take upper spectrum, if it's negative, we take lower spectrum
+            # most certainly fvideo will be always high, but one can never tell
+            if self.fvideo[i] > 0:
                 self.spectr_bbc_final[i] = self.spectr_bbc[i][int(self.NN / 2):]
-            else:  # jak nie, to dolne
+            else:
                 self.spectr_bbc_final[i] = self.spectr_bbc[i][:int(self.NN / 2)]
 
-    # -- kalibruje dane w tsys --
-    def calibrate_in_tsys(self):
+    def calibrate_in_tsys(self) -> None:
+        """
+        Calibrate specturm in system temperature units
+        """
         for i in range(len(self.auto)):
             self.spectr_bbc_final[i] = self.spectr_bbc_final[i] * self.tsys[i]
 
-    # -- wyświetla rozszerzone informacje o procedurze --
+
     def extended_print(self):
+        """
+        Extended spectrum information - normally disabled, but useful for debugging and checking the results of doppler shift correction
+        """
         print('f(LSR)/MHz   f(sky)      LO1(RF)    LO2(BBC)   fvideo   v(Dopp) [km/s] V(LSR)')
         # print(tab[i].rest[0], tab[i].fsky[0], tab[i].lo[0], tab[i].bbcfr[0], tab[i].fvideo[0], -Vdop, tab[i].vlsr)
         print('%.3f    %.3f    %.3f    %.3f    %.3f    %.3f       %.3f' % (self.rest[0], self.fsky[0], self.lo[0],
@@ -551,42 +559,39 @@ class Scan:
         print("Threshold (u=V/rms) =               %.4f    %.4f    %.4f    %.4f" % (self.V_sigma[0], self.V_sigma[1],
                                                                                     self.V_sigma[2], self.V_sigma[3]))
 
-    # ---- POMOCNICZE METODY PRYWATNE ----
-
-    # -- oblicza prędkość słońca względem LSR (local standard of rest) --
-    # -- rzutowaną na kierunek, w którym jest źródełko --
-    # -- RA i DEC podawane muszą być w STOPNIACH --
-    # -- i poprawione na PRECESJĘ --
-    def __lsr_motion(self, ra, dec, decimalyear):
-
-        # -- zacztnamy --
-        vSun0 = 20.0
-
-        # -- współrzędne apeksu słońca z 1900 --
-        ras = 18.0 * pi / 12.0  # radiany
-        decs = 30.0 * pi / 180.0  # radiany
-        # -- obiekt skycoord - apeks słońca w roku 1900 --
+    def __lsr_motion(
+            self,
+            target_ra_deg: float,
+            target_dec_deg: float,
+            decimalyear: float) -> float:
+        """
+        Calculates sun velocity relative to the local standard of rest, projected into the direction of the source
+        :param target_ra_deg: right ascension of the source (after precession corrections applied!) - in degrees
+        :param target_dec_deg: declination of the source (after precession corrections applied!) - in degrees
+        :param decimalyear: decimal year of the observation (after precession corrections applied!)
+        :return: velocity of the sun relative to the local standard of rest, projected into the direction of the source (in km/s)
+        """
+        v_sun_0 = 20.0
+        # -- sun apex coordinates in the year 1900 (in radians) --
+        ras = 18.0 * pi / 12.0
+        decs = 30.0 * pi / 180.0
         sunc = SkyCoord(ras * u.rad, decs * u.rad, frame=FK5, equinox="B1900")
-        # deklarujemy nowy frame z epoką jak nasze obserwacje
+
+        # -- actual observation epoch FK5 frame --
         sunc_now = FK5(equinox="J" + str(decimalyear))
-        # przechodzimy między frame'ami
-        sunc_new = sunc.transform_to(sunc_now)
-        # ekstra*ujemy współrzędne i zamieniamy na radiany
-        dec_new = radians((sunc_new.dec * u.degree).value)
-        ra_new = radians((sunc_new.ra * u.degree).value)
+        sunc_new = sunc.transform_to(sunc_now) # transformation from 1900 to obs. epoch
+        sun_dec_now_rad = radians((sunc_new.dec * u.degree).value)
+        sun_ra_now_rad = radians((sunc_new.ra * u.degree).value)
 
-        # -- zamieniamy ra i dec na radiany --
-        ra = radians(ra)
-        dec = radians(dec)
-        # -- funkcje na przekazanych współrzędnych
-        cdec = cos(dec)
-        sdec = sin(dec)
+        # -- prepare some values to simplify final formula --
+        target_ra_rad = radians(target_ra_deg)
+        target_dec_rad = radians(target_dec_deg)
+        cdec = cos(target_dec_rad)
+        sdec = sin(target_dec_rad)
 
-        # -- obliczamy prędkość słońca względem local standard of rest --
-        # -- w kierunku ra i dec --
-        vSun = vSun0 * (sin(dec_new) * sdec + cos(dec_new) * cdec * cos(ra - ra_new))
-        return vSun
-        # -------------
+        # -- final calculation --
+        v_sun = v_sun_0 * (sin(sun_dec_now_rad) * sdec + cos(sun_dec_now_rad) * cdec * cos(target_ra_rad - sun_ra_now_rad))
+        return v_sun
 
     # -- metoda: correctACF --
     # nakłada na funkcję autokorelacji krektę na 2 i 3 - poziomową kwantyzację
