@@ -1,243 +1,67 @@
 """
 Class, that holds singular data scan from autocorrelator spectrometer
 - and handles its processing
-Data utworzenia: 05.03.2022
-Właściciel: Michał Durjasz
+First version creation date: 05.03.2022
+Owner: Michał Durjasz (md@astro.umk.pl)
 This file is part of the NCU-SALSA-RT4 package
 """
 
-# -- importujemy potrzebne moduły --
-# -- numpy --
-from numpy import exp, nan, int64, sin, cos, asarray, sqrt, mean, pi, radians, zeros, inf, complex128, linspace, loadtxt
+# -- import block --
+from numpy import exp, int64, sin, cos, asarray, sqrt, mean, pi, radians, zeros, inf, complex128, linspace
 from numpy.fft import fft
-# -----------
-# -- math i mpmath --
 from math import copysign
 from cmath import sqrt as math_sqrt
 from mpmath import nint
-# -----------
-# -- astropy --
 from astropy.time import Time
 from astropy.coordinates import SkyCoord, FK5
 import astropy.units as u
-# -------------
-# -- sys --
-from sys import argv, exit
-# ---------
-# -- barycorrpy --
+from sys import exit
 import barycorrpy
-# ----------------
+
 
 class Scan:
-    # -- metoda inicjująca klasę --
     def __init__(self, filename, onOFF=False):
-        self.isOnOff = onOFF
-        # -- stałe --
-        self.c = 2.99792458e+5
+        self.isOnOff: bool = onOFF
+        # constants
+        self.c: float = 2.99792458e+5
         self.NN = 8192
-
-        # -- tablica z częstotliwościami restf --
-        self.template_restfreqs = [1420.405751, 1612.23101, 1665.40184, 1667.35903, 1720.52998, 6668.518, 6030.747,
-                                   6035.092, 6049.084, 6016.746, 4765.562, 4592.976, 4593.098, 4829.664, 2178.595]
-
-        # -- zapisujemy pierwszy atrybut - nazwę pliku .DAT --
+        self.template_restfreqs = [
+            1420.405751, # HI
+            1612.23101,
+            1665.40184,
+            1667.35903,
+            1720.52998,
+            6668.518, # CH3OH
+            6030.747,
+            6035.092,
+            6049.084,
+            6016.746,
+            4765.562,
+            4592.976,
+            4593.098,
+            4829.664,
+            2178.595]
+        # read data
         self.fname = filename
-
-        # -- czytamy dalej --
         self.read_header_and_data()
 
-    # -- metoda wczytująca plik .DAT --
-    def read_header_and_data(self):
-        # -- wczytujemy plik do pamięci --
+    def read_header_and_data(self) -> None:
+        """
+        Reads data and metadata from singular scan file
+        :return: None
+        """
         try:
-            fle = open(self.fname, 'r+')
-            a = fle.readlines()
+            fle = open(self.fname, "r+")
+            file_lines = fle.readlines()
             fle.close()
         except FileNotFoundError:
             print("-----> File \"%s\" does not exist! Exiting..." % self.fname)
             print("-----------------------------------------")
             exit()
 
-        # -- czytamy dalej --
-        # nazwa źródła
-        self.sourcename = a[0].split("\'")[1].strip()
-        self.INT = float((a[0].split())[1])
-
-        # rektascensja
-        tmp = a[1].split()
-        self.RA = float(tmp[1]) + float(tmp[2]) / 60.0 + float(tmp[3]) / 3600.0
-        self.rah = int(tmp[1])
-        self.ram = int(tmp[2])
-        self.ras = int(tmp[3])
-
-        # deklinacja
-        # jeśli pierwsza liczba (stopnie) jest większa od zera
-        if float(tmp[4]) > 0:
-            self.DEC = float(tmp[4]) + float(tmp[5]) / 60.0 + float(tmp[6]) / 3600.0
-        # jeśli pierwsza liczba jest równa zero, sprawdzamy znak przed
-        elif float(tmp[4]) == 0.0:
-            # jeśli jest minus, lecimy z ujemnym dec
-            if tmp[4][0] == '-':
-                self.DEC = -1.0 * (-1.0 * float(tmp[4]) + float(tmp[5]) / 60.0 + float(tmp[6]) / 3600.0)
-            # jeśli jest plus lub nic nie ma (jak na kurachen.org), lecimy z dodatnim dec
-            else:
-                self.DEC = float(tmp[4]) + float(tmp[5]) / 60.0 + float(tmp[6]) / 3600.0
-
-        # jeśli pierwsza liczba (stopnie) jest mniejsza od zera
-        else:
-            self.DEC = -1.0 * (-1.0 * float(tmp[4]) + float(tmp[5]) / 60.0 + float(tmp[6]) / 3600.0)
-
-        self.decd = int(tmp[4])
-        self.decm = int(tmp[5])
-        self.decs = int(tmp[6])
-        # epoka
-        self.epoch = float(tmp[7])
-
-        # azymut i elewacja
-        tmp = a[2].split()
-        self.AZ = float(tmp[1])  # azymut
-        self.EL = float(tmp[2])  # elewacja
-        self.azd = int(self.AZ)
-        self.azm = int(60 * (self.AZ % 1))
-        self.eld = int(self.EL)
-        self.elm = int(60 * (self.EL % 1))
-        # czas
-        tmp = a[4].split()
-        # UT
-        self.UTh = float(tmp[1])  # godzina UT
-        self.UTm = float(tmp[2])  # minuta UT
-        self.UTs = float(tmp[3])  # sekunda UT
-        # ST
-        self.STh = int(tmp[4])  # godzina ST
-        self.STm = int(tmp[5])  # minuta ST
-        self.STs = int(tmp[6])  # sekunda ST
-        # data
-        tmp = a[5].split()
-        self.lsec = float(tmp[1])  # sekunda linukskowa
-        self.dayn = float(tmp[2])  # dzień roku
-        self.year = float(tmp[7])  # rok
-        # szukamy miesiąca
-        self.monthname = tmp[4]
-        self.monthtab = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-        self.month = float(self.monthtab.index(self.monthname)) + 1
-        self.day = float(tmp[5])
-
-        # -- reszta dat - przeliczamy je --
-        # na początek konstruujemy formatkę: YYYY-MM-DDTHH:MM:SS
-        self.isotime = str(int(self.year)) + "-"  # + str(int(self.month))
-
-        if len(str(int(self.month))) == 1:
-            self.isotime = self.isotime + "0" + str(int(self.month)) + "-"
-        else:
-            self.isotime = self.isotime + str(int(self.month)) + "-"
-
-        if len(str(int(self.day))) == 1:
-            self.isotime = self.isotime + "0" + str(int(self.day)) + "T"
-        else:
-            self.isotime = self.isotime + str(int(self.day)) + "T"
-
-        if len(str(int(self.UTh))) == 1:
-            self.isotime = self.isotime + "0" + str(int(self.UTh)) + ":"
-        else:
-            self.isotime = self.isotime + str(int(self.UTh)) + ":"
-
-        if len(str(int(self.UTm))) == 1:
-            self.isotime = self.isotime + "0" + str(int(self.UTm)) + ":"
-        else:
-            self.isotime = self.isotime + str(int(self.UTm)) + ":"
-
-        if len(str(int(self.UTs))) == 1:
-            self.isotime = self.isotime + "0" + str(int(self.UTs))
-        else:
-            self.isotime = self.isotime + str(int(self.UTs))
-
-        # nasza formatka nazywa się "isotime" i służy jako argument
-        # do funkcji "Time" z pakietu astropy.time
-        # -- oblczamy czasy --
-        self.tee = Time(self.isotime, format="isot", scale="utc")
-        self.decimalyear = self.tee.decimalyear
-        self.jd = self.tee.jd
-        self.mjd = self.tee.mjd
-
-        # -- tworzymy stringi do zapisu w pliku --
-        # tym razem chodzi o coś w stylu 270421
-        self.datestring = ""
-        if len(str(int(self.day))) == 1:
-            self.datestring = self.datestring + "0" + str(int(self.day))
-        else:
-            self.datestring = self.datestring + str(int(self.day))
-
-        if len(str(int(self.month))) == 1:
-            self.datestring = self.datestring + "0" + str(int(self.month))
-        else:
-            self.datestring = self.datestring + str(int(self.month))
-
-        self.datestring = self.datestring + str(int(self.year - 2000))
-
-        # -- częstotliwości --
-        self.freq = []
-        self.freqa = []
-        self.rest = []
-        self.bbcfr = []
-        self.bbcnr = []
-        self.polnames = []
-        self.bw = []
-        self.vlsr = []
-        self.lo = []
-        self.tsys = []
-
-        tmp = a[6].split()
-        for i in range(len(tmp) - 1):
-            self.freq.append(float(tmp[i + 1]))
-
-        tmp = a[7].split()
-        for i in range(len(tmp) - 1):
-            self.freqa.append(float(tmp[i + 1]))
-
-        tmp = a[8].split()
-        for i in range(len(tmp) - 1):
-            self.rest.append(float(tmp[i + 1]))
-
-        tmp = a[9].split()
-        for i in range(len(tmp) - 1):
-            self.bbcfr.append(float(tmp[i + 1]))
-
-        tmp = a[10].split()
-        for i in range(len(tmp) - 1):
-            self.bbcnr.append(int(tmp[i + 1]))
-
-        tmp = a[11].split()
-        for i in range(len(tmp) - 1):
-            self.bw.append(float(tmp[i + 1]))
-
-        tmp = a[12].split()
-        for i in range(len(tmp) - 1):
-            self.polnames.append(tmp[i + 1])
-
-        tmp = a[13].split()
-        for i in range(len(tmp) - 1):
-            self.vlsr.append(float(tmp[i + 1]))
-
-        tmp = a[14].split()
-        for i in range(len(tmp) - 1):
-            self.lo.append(float(tmp[i + 1]))
-
-        tmp = a[15].split()
-        for i in range(len(tmp) - 1):
-            self.tsys.append(float(tmp[i + 1]))
-
-        self.freq = asarray(self.freq)
-        self.freqa = asarray(self.freqa)
-        self.rest = asarray(self.rest)
-        self.bbcfr = asarray(self.bbcfr)
-        self.bbcnr = asarray(self.bbcnr)
-        self.polnames = asarray(self.polnames)
-        self.bw = asarray(self.bw)
-        self.vlsr = asarray(self.vlsr)
-        self.lo = asarray(self.lo)
-        self.tsys = asarray(self.tsys)
-
-        self.read_data(a[19:])
+        # -- reading metadata block --
+        self.read_file_metadata(file_lines)
+        self.read_data(file_lines[19:])
 
     def read_data(self, a):
         # -- deklarujemy kontenery dla konkretnych BBC --
@@ -276,9 +100,201 @@ class Scan:
         self.auto = asarray(self.auto)
         # ----- Koniec czytania danych --
 
-    def correct_auto(self, scannr=1):
+    def read_file_metadata(self, file_lines: list[str]) -> None:
+        """
+        Reads metadata from scan file
+        :param file_lines: list of strings, represented line by line
+        :return: None
+        """
+        # -- source name --
+        self.sourcename = file_lines[0].split("\'")[1].strip()
+        self.INT = float((file_lines[0].split())[1])
 
-        # deklarujemy na początek tablice numpy
+        # -- coordinates: right ascension --
+        tmp = file_lines[1].split()
+        self.RA = float(tmp[1]) + float(tmp[2]) / 60.0 + float(tmp[3]) / 3600.0
+        self.rah = int(tmp[1])
+        self.ram = int(tmp[2])
+        self.ras = int(tmp[3])
+
+        # -- coordinates: declination --
+        if float(tmp[4]) > 0:
+            self.DEC = float(tmp[4]) + float(tmp[5]) / 60.0 + float(tmp[6]) / 3600.0
+        elif float(tmp[4]) == 0.0:
+            if tmp[4][0] == '-':
+                self.DEC = -1.0 * (-1.0 * float(tmp[4]) + float(tmp[5]) / 60.0 + float(tmp[6]) / 3600.0)
+            else:
+                self.DEC = float(tmp[4]) + float(tmp[5]) / 60.0 + float(tmp[6]) / 3600.0
+        else:
+            self.DEC = -1.0 * (-1.0 * float(tmp[4]) + float(tmp[5]) / 60.0 + float(tmp[6]) / 3600.0)
+        self.decd = int(tmp[4])
+        self.decm = int(tmp[5])
+        self.decs = int(tmp[6])
+
+        # -- epoch --
+        self.epoch = float(tmp[7])
+
+        # -- coordinates: azimuth and elevation angles --
+        tmp = file_lines[2].split()
+        self.AZ = float(tmp[1])
+        self.EL = float(tmp[2])
+        self.azd = int(self.AZ)
+        self.azm = int(60 * (self.AZ % 1))
+        self.eld = int(self.EL)
+        self.elm = int(60 * (self.EL % 1))
+
+        # -- time --
+        tmp = file_lines[4].split()
+        # UT
+        self.UTh = float(tmp[1])  # godzina UT
+        self.UTm = float(tmp[2])  # minuta UT
+        self.UTs = float(tmp[3])  # sekunda UT
+        # ST
+        self.STh = int(tmp[4])  # godzina ST
+        self.STm = int(tmp[5])  # minuta ST
+        self.STs = int(tmp[6])  # sekunda ST
+        # decimal year
+        tmp = file_lines[5].split()
+        self.lsec = float(tmp[1])  # sekunda linukskowa
+        self.dayn = float(tmp[2])  # dzień roku
+        self.year = float(tmp[7])  # rok
+        # search for month number - based on string
+        self.monthname = tmp[4]
+        self.monthtab = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+        self.month = float(self.monthtab.index(self.monthname)) + 1
+        self.day = float(tmp[5])
+
+        # -- rest of date - adjust date format to match ISO 8601 standard --
+        self.isotime = self._format_time_to_iso_8601()
+
+        # -- calculate time using astropy time --
+        self.tee = Time(self.isotime, format="isot", scale="utc")
+        self.decimalyear = self.tee.decimalyear
+        self.jd = self.tee.jd
+        self.mjd = self.tee.mjd
+
+        # -- create << datestring >> for saving in file --
+        self.datestring = self._create_datestring()
+
+        # -- frequencies --
+        self.freq = []
+        self.freqa = []
+        self.rest = []
+        self.bbcfr = []
+        self.bbcnr = []
+        self.polnames = []
+        self.bw = []
+        self.vlsr = []
+        self.lo = []
+        self.tsys = []
+        self._fill_frequency_tables(file_lines)
+
+    def _fill_frequency_tables(self, file_lines: list[str]) -> None:
+        tmp = file_lines[6].split()
+        for i in range(len(tmp) - 1):
+            self.freq.append(float(tmp[i + 1]))
+
+        tmp = file_lines[7].split()
+        for i in range(len(tmp) - 1):
+            self.freqa.append(float(tmp[i + 1]))
+
+        tmp = file_lines[8].split()
+        for i in range(len(tmp) - 1):
+            self.rest.append(float(tmp[i + 1]))
+
+        tmp = file_lines[9].split()
+        for i in range(len(tmp) - 1):
+            self.bbcfr.append(float(tmp[i + 1]))
+
+        tmp = file_lines[10].split()
+        for i in range(len(tmp) - 1):
+            self.bbcnr.append(int(tmp[i + 1]))
+
+        tmp = file_lines[11].split()
+        for i in range(len(tmp) - 1):
+            self.bw.append(float(tmp[i + 1]))
+
+        tmp = file_lines[12].split()
+        for i in range(len(tmp) - 1):
+            self.polnames.append(tmp[i + 1])
+
+        tmp = file_lines[13].split()
+        for i in range(len(tmp) - 1):
+            self.vlsr.append(float(tmp[i + 1]))
+
+        tmp = file_lines[14].split()
+        for i in range(len(tmp) - 1):
+            self.lo.append(float(tmp[i + 1]))
+
+        tmp = file_lines[15].split()
+        for i in range(len(tmp) - 1):
+            self.tsys.append(float(tmp[i + 1]))
+
+        self.freq = asarray(self.freq)
+        self.freqa = asarray(self.freqa)
+        self.rest = asarray(self.rest)
+        self.bbcfr = asarray(self.bbcfr)
+        self.bbcnr = asarray(self.bbcnr)
+        self.polnames = asarray(self.polnames)
+        self.bw = asarray(self.bw)
+        self.vlsr = asarray(self.vlsr)
+        self.lo = asarray(self.lo)
+        self.tsys = asarray(self.tsys)
+
+    def _create_datestring(self) -> str:
+        """
+        (OBSOLETE) Create datestring in new format (DDMMYY) for saving in file name
+        :return: datestring
+        """
+        datestring = ""
+        if len(str(int(self.day))) == 1:
+            datestring = datestring + "0" + str(int(self.day))
+        else:
+            datestring = datestring + str(int(self.day))
+
+        if len(str(int(self.month))) == 1:
+            datestring = datestring + "0" + str(int(self.month))
+        else:
+            datestring = datestring + str(int(self.month))
+        datestring = datestring + str(int(self.year - 2000))
+        return datestring
+
+
+    def _format_time_to_iso_8601(self) -> str:
+        """
+        Based on the avaliable information creates
+        time string in the ISO8601 format
+        :return: string in ISO8601 format
+        """
+        isotime = str(int(self.year)) + "-"
+        if len(str(int(self.month))) == 1:
+            isotime = isotime + "0" + str(int(self.month)) + "-"
+        else:
+            isotime = isotime + str(int(self.month)) + "-"
+        if len(str(int(self.day))) == 1:
+            isotime = isotime + "0" + str(int(self.day)) + "T"
+        else:
+            isotime = isotime + str(int(self.day)) + "T"
+        if len(str(int(self.UTh))) == 1:
+            isotime = isotime + "0" + str(int(self.UTh)) + ":"
+        else:
+            isotime = isotime + str(int(self.UTh)) + ":"
+        if len(str(int(self.UTm))) == 1:
+            isotime = isotime + "0" + str(int(self.UTm)) + ":"
+        else:
+            isotime = isotime + str(int(self.UTm)) + ":"
+        if len(str(int(self.UTs))) == 1:
+            isotime = isotime + "0" + str(int(self.UTs))
+        else:
+            isotime = isotime + str(int(self.UTs))
+        return isotime
+
+    def correct_auto(self) -> None:
+        """
+        This method is responsible for correcting the autocorrelation function
+        :return: None
+        """
+        # -- declarations --
         self.average = zeros(4)
         self.auto0tab = zeros(4)
         self.multiple = zeros(4, dtype=int64)

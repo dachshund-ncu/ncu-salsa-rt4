@@ -97,7 +97,7 @@ class ScanSet:
         source_JNOW_RA = (source_JNOW.ra * u.degree).value
         source_JNOW_DEC = (source_JNOW.dec * u.degree).value
         # signal processing
-        scan.correct_auto(scannr=i + 1)
+        scan.correct_auto()
         scan.hanning_smooth()
         scan.doppset(source_JNOW_RA, source_JNOW_DEC, latitude_deg, longitude_deg, height_m_asl)
         if debug:
