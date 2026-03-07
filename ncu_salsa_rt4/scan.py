@@ -449,6 +449,24 @@ class Scan:
         :param observatory_height_m_asl: observatory height above sea level
         :return: None
         """
+        self.__calculate_velocities(
+            source_ra_now_deg,
+            source_dec_now_deg,
+            observatory_lattitude,
+            observatory_longitude,
+            observatory_height_m_asl)
+
+        self.__match_rest_frequencies()
+
+        self.__correct_doppler_shift()
+
+    def __calculate_velocities(
+            self,
+            source_ra_now_deg: float,
+            source_dec_now_deg: float,
+            observatory_lattitude: float,
+            observatory_longitude: float,
+            observatory_height_m_asl: float) -> None:
         # -- barycentric velocity of the observatory --
         # NOTE: we use nominal coordinates here, because barycorrpy performs precession on its own
         bar = barycorrpy.get_BC_vel(
@@ -465,14 +483,16 @@ class Scan:
         # -- final velocity for doppler shift calculation --
         self.Vdop = self.baryvel + self.lsrvel
 
-        # -- rest freq correction --
-        # replace the file rest frequency with values from the standard table (if they match)
-        for i in range(len(self.auto)):  # iteracja po indeksach
-            for tmp_ind in self.template_restfreqs:  # iteracja po templatkach
-                if int(self.rest[i]) == int(tmp_ind):
-                    self.rest[i] = tmp_ind
-                    break
+    def __match_rest_frequencies(self):
+        """Vectorized matching of rest frequencies to templates."""
+        # Convert template to set for O(1) lookup or use np.isin
+        rest_ints = self.rest.astype(int)
+        for tmp in self.template_restfreqs:
+            mask = rest_ints == int(tmp)
+            self.rest[mask] = tmp
 
+
+    def __correct_doppler_shift(self):
         # -- doppler shift correction --
         # -- or so called rotating the spectrum --
         # declare tables
