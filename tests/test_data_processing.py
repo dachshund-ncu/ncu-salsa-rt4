@@ -30,14 +30,14 @@ def test_processing_performance():
     old_timings = []
     for archive in test_data_filenames:
         start_time = time.time()
-        scan_set = ScanSet(archive_filename=archive, on_off=False, debug=False, use_optimized_methods=False)
+        scan_set = ScanSet(archive_filename=archive, on_off=False, debug=False, use_optimized_methods=False, use_multithreaded_utils=False)
         end_time = time.time()
         old_timings.append(end_time - start_time)
 
     new_timings = []
     for archive in test_data_filenames:
         start_time = time.time()
-        scan_set = ScanSet(archive_filename=archive, on_off=False, debug=False, use_optimized_methods=True)
+        scan_set = ScanSet(archive_filename=archive, on_off=False, debug=False, use_optimized_methods=True, use_multithreaded_utils=False)
         end_time = time.time()
         new_timings.append(end_time - start_time)
 

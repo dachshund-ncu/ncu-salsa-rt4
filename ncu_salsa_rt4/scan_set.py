@@ -3,11 +3,12 @@ Module: ncu_salsa_rt4.scan_set
 Creation date: 2026-02-01
 Owner: Michał Durjasz
 """
+from threading import Thread
 import tarfile
 from astropy.coordinates import SkyCoord, FK5
 import astropy.units as u
 import numpy as np
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from .scan import Scan
 from .scan_merged import MergedScan
 import os
@@ -18,10 +19,12 @@ class ScanSet:
             archive_filename: str,
             on_off: bool = False,
             debug: bool = False,
-            use_optimized_methods: bool = True):
+            use_optimized_methods: bool = True,
+            use_multithreaded_utils: bool = False):
         self.isOnOff = on_off
         self.debug = debug
-        self.useOptimizedMethods = use_optimized_methods
+        self.use_optimized_methods = use_optimized_methods
+        self.use_multithreaded_utils = use_multithreaded_utils
         self.archive_directory = os.path.dirname(archive_filename)
         self.archive_filename = archive_filename
         self.__tmp_dir_name = os.path.join(self.archive_directory, ".tmp_auto_scans_data")
@@ -38,7 +41,10 @@ class ScanSet:
 
     def __process_data(self):
         self.noOfScans = len(self.scans)
-        self.scans = self.proceed_scans_sequential()
+        if self.use_multithreaded_utils:
+            self.scans = self.proceed_scans()
+        else:
+            self.scans = self.proceed_scans_sequential()
         # self.scans = self.proceed_scans()
         self.mergedScans: list[MergedScan] = self.merge_scans(self.scans)
         self.mjd = self.__calculate_mjd()
@@ -99,7 +105,7 @@ class ScanSet:
         source_JNOW_RA = (source_JNOW.ra * u.degree).value
         source_JNOW_DEC = (source_JNOW.dec * u.degree).value
         # signal processing
-        if self.useOptimizedMethods:
+        if self.use_optimized_methods:
             scan.correct_auto_optimized()
         else:
             scan.correct_auto()
