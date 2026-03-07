@@ -17,6 +17,7 @@ from astropy.coordinates import SkyCoord, FK5
 import astropy.units as u
 from sys import exit
 import barycorrpy
+import numpy as np
 from datetime import datetime
 
 class Scan:
@@ -378,10 +379,12 @@ class Scan:
         """
         Applies Hanning smoothing to the ACF function
         """
-        for i in range(len(self.auto)):
-            for j in range(1, len(self.auto[i]), 1):
-                cosine = cos(pi * (j - 1) / self.NN) ** 2.0
-                self.auto[i][j] = self.auto[i][j] * cosine
+        auto_arr = np.array(self.auto)
+        num_cols = auto_arr.shape[1]
+        j = np.arange(1, num_cols)
+        cosine_window = np.cos(np.pi * (j - 1) / self.NN) ** 2.0
+        auto_arr[:, 1:] *= cosine_window
+        self.auto = auto_arr
 
     def doppset(
             self,
