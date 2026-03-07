@@ -17,9 +17,11 @@ class ScanSet:
             self,
             archive_filename: str,
             on_off: bool = False,
-            debug: bool = False):
+            debug: bool = False,
+            use_optimized_methods: bool = True):
         self.isOnOff = on_off
         self.debug = debug
+        self.useOptimizedMethods = use_optimized_methods
         self.archive_directory = os.path.dirname(archive_filename)
         self.archive_filename = archive_filename
         self.__tmp_dir_name = os.path.join(self.archive_directory, ".tmp_auto_scans_data")
@@ -97,7 +99,10 @@ class ScanSet:
         source_JNOW_RA = (source_JNOW.ra * u.degree).value
         source_JNOW_DEC = (source_JNOW.dec * u.degree).value
         # signal processing
-        scan.correct_auto()
+        if self.useOptimizedMethods:
+            scan.correct_auto_optimized()
+        else:
+            scan.correct_auto()
         scan.hanning_smooth()
         scan.doppset(source_JNOW_RA, source_JNOW_DEC, latitude_deg, longitude_deg, height_m_asl)
         if debug:

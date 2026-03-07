@@ -1,10 +1,8 @@
 import json
 import os
-
 import pytest
-
+import time
 from ncu_salsa_rt4 import ScanSet
-
 from .data import target_data_filenames, test_data_filenames
 
 
@@ -28,6 +26,24 @@ def test_data_accuracy():
                 )
         print(f"--> {os.path.basename(archive)}, {os.path.basename(json_target)}")
 
+def test_processing_performance():
+    old_timings = []
+    for archive in test_data_filenames:
+        start_time = time.time()
+        scan_set = ScanSet(archive_filename=archive, on_off=False, debug=False, use_optimized_methods=False)
+        end_time = time.time()
+        old_timings.append(end_time - start_time)
+
+    new_timings = []
+    for archive in test_data_filenames:
+        start_time = time.time()
+        scan_set = ScanSet(archive_filename=archive, on_off=False, debug=False, use_optimized_methods=True)
+        end_time = time.time()
+        new_timings.append(end_time - start_time)
+
+    for old_time, new_time in zip(old_timings, new_timings):
+        print(f"---> Old: {old_time}, New: {new_time}")
 
 if __name__ == "__main__":
     test_data_accuracy()
+    test_processing_performance()

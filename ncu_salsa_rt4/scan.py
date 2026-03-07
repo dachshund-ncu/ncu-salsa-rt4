@@ -365,8 +365,6 @@ class Scan:
             else:
                 self.auto[i] = self.auto[i] / self.zero_lag_auto[i]
 
-            # quantization correction - correct the ACF function for 2- and 3-level quantization
-            # this approach is rather slow, needs to be rewritten
             for j in range(len(self.auto[i])):
                 # to avoid nans and infs, we check the value of the correction before applying it
                 tmp_number = self.__correctACF(self.auto[i][j], self.r0[i], self.bias0[i])
@@ -374,6 +372,55 @@ class Scan:
                     self.auto[i][j] = 0.0
                 else:
                     self.auto[i][j] = tmp_number
+
+    def correct_auto_optimized(self) -> None:
+        """
+        Preprocesses the loaded ACF function for fourier transform
+        This is optimized version of the previous utility: correct_auto
+        :return:
+        """
+        # Convert self.auto to a 2D numpy array if it isn't already
+        # Shape is (4, channels)
+        auto_arr = np.array(self.auto)
+
+        # 1. Batch Mean Calculation (last 240 channels)
+        self.average = np.mean(auto_arr[:, 3857:], axis=1)
+
+        # 2. Extract first and second values (tau=0 and tau=1)
+        self.auto0tab = auto_arr[:, 0]
+        self.zero_lag_auto_raw = auto_arr[:, 1]  # Temporary raw values
+
+        # 3. Vectorized Math (Avoids 0-division using np.where)
+        self.multiple = np.where(self.average != 0,
+                                 np.round(self.auto0tab / self.average).astype(np.int64),
+                                 0)
+
+        self.Nmax = np.where(self.multiple != 0,
+                             (self.auto0tab / self.multiple).astype(np.int64),
+                             0)
+
+        self.bias0 = np.where(self.Nmax != 0,
+                              (self.average / self.Nmax) - 1,
+                              0.0)
+
+        # 4. Batch Bias Subtraction
+        auto_arr -= self.Nmax[:, np.newaxis]
+
+        # 5. Get corrected zero_lag_auto and r0
+        self.zero_lag_auto = auto_arr[:, 1]
+        self.r0 = np.where(self.Nmax != 0, self.zero_lag_auto / self.Nmax, 0.0)
+
+        # 6. Normalization
+        nonzero_mask = self.zero_lag_auto != 0
+        # Create an output array of zeros
+        norm_auto = np.zeros_like(auto_arr, dtype=np.float64)
+        # Only divide where zero_lag_auto is non-zero
+        norm_auto[nonzero_mask] = auto_arr[nonzero_mask] / self.zero_lag_auto[nonzero_mask, np.newaxis]
+
+        self.auto = norm_auto  # Convert back to list if required by your class
+
+        # 7. Van vleck correction
+        self.__correct_acf_new()
 
     def hanning_smooth(self):
         """
@@ -647,6 +694,90 @@ class Scan:
                                 -1.452946181286572 + autof2 * 0.520334578982730)))) + 0.22613222 * (
                                            0.53080867 - r0) * cos(3.11635 * (autof - 0.49595))
                 return correct_auto
+
+    def __correct_acf_new(self) -> None:
+        # Ensure auto is a 2D numpy array: (4, N)
+        auto_arr = np.array(self.auto)
+
+        # Reshape scalar-per-row values to (4, 1) for 2D broadcasting
+        r0 = self.r0[:, np.newaxis]
+        r_mean = self.bias0[:, np.newaxis]
+
+        # Initialize output
+        result = np.zeros_like(auto_arr)
+
+        # --- BRANCH A: Low r_mean (r_mean <= 1e-5) ---
+        # We create a mask for the rows that meet the r_mean condition
+        row_mask_a = (self.bias0 <= 1e-5)
+        if np.any(row_mask_a):
+            # Slice only the rows needed
+            a_autof = auto_arr[row_mask_a]
+            a_r0 = self.r0[row_mask_a][:, np.newaxis]
+            a_res = np.zeros_like(a_autof)
+
+            r = np.clip(np.abs(a_autof), 0, 1.0)
+            sgn = np.sign(a_autof)
+
+            # Sub-branch 1: 0 < r0 < 0.3
+            m1 = (self.r0[row_mask_a] > 0) & (self.r0[row_mask_a] < 0.3)
+            if np.any(m1):
+                rs = r[m1] * 0.0574331
+                rho = rs * (60.50861 + rs * (-1711.23607 + rs * (26305.13517 - rs * 167213.89458))) / 0.99462695104383
+                a_res[m1] = sgn[m1] * rho
+
+            # Sub-branch 2: 0.3 <= r0 < 0.9
+            m2 = (self.r0[row_mask_a] >= 0.3) & (self.r0[row_mask_a] < 0.9)
+            if np.any(m2):
+                rs = r[m2] * 0.548506
+                rho = (rs * (2.214 + rs * (
+                            0.85701 + rs * (-7.67838 + rs * (22.42186 - rs * 24.896))))) / 0.998609598617374
+                a_res[m2] = sgn[m2] * rho
+
+            # Sub-branch 3: r0 >= 0.9
+            m3 = (self.r0[row_mask_a] >= 0.9)
+            if np.any(m3):
+                a_res[m3] = sgn[m3] * np.sin(1.570796326794897 * r[m3])
+
+            result[row_mask_a] = a_res
+
+        # --- BRANCH B: High r_mean (r_mean > 1e-5) ---
+        row_mask_b = (self.bias0 > 1e-5)
+        if np.any(row_mask_b):
+            b_autof = auto_arr[row_mask_b]
+            b_r0 = self.r0[row_mask_b][:, np.newaxis]
+            b_autof2 = b_autof ** 2
+            b_res = np.zeros_like(b_autof)
+
+            # Mask 1: abs < 0.5
+            m_small = np.abs(b_autof) < 0.5
+            fac = 4.167810515925 - b_r0 * 7.8518131881775
+            # Pre-calculating constants for the row
+            a = -0.0007292201019684441 - 0.0005671518541787936 * fac
+            b = 1.2358980680949918 + 0.03931789097196692 * fac
+            c = -0.11565632506887912 + 0.08747950965746415 * fac
+            d = 0.01573239969731158 - 0.06572872697836053 * fac
+            b_res[m_small] = (a + (b + (c + d * b_autof2) * b_autof2) * b_autof)[m_small]
+
+            # Mask 2: > 0.5
+            m_pos = b_autof >= 0.5
+            if np.any(m_pos):
+                b_res[m_pos] = (-1.1568973833585783 + 10.27012449073475 * b_autof - 27.537554958512125 * b_autof2
+                                + 40.54762923890069 * b_autof ** 3 - 28.758995213769058 * b_autof2 ** 2
+                                + 7.635693826008257 * b_autof ** 5
+                                + 0.218044850 * (0.53080867 - b_r0) * np.cos(3.12416 * (b_autof - 0.49721)))[m_pos]
+
+            # Mask 3: <= -0.5
+            m_neg = b_autof <= -0.5
+            if np.any(m_neg):
+                b_res[m_neg] = (-0.0007466171982634772 + b_autof * (1.2660000881004778 + b_autof2 * (
+                            -0.4237089538779861 + b_autof2 * (
+                                1.0910718879007775 + b_autof2 * (-1.452946181286572 + b_autof2 * 0.520334578982730))))
+                                + 0.22613222 * (0.53080867 - b_r0) * np.cos(3.11635 * (b_autof - 0.49595)))[m_neg]
+
+            result[row_mask_b] = b_res
+
+        # Final cleanup and store
+        self.auto = np.nan_to_num(result, nan=0.0, posinf=0.0, neginf=0.0)
 
     def __clip_level(
             self,
