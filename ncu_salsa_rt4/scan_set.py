@@ -151,3 +151,14 @@ class ScanSet:
 
     def __calculate_mjd(self):
         return np.mean([s.mjd for s in self.scans])
+
+    def save_to_file_json(self, filename: str ="spectral_data.json") -> None:
+        import json
+        dictionaries = []
+        for scan_single in self.scans:
+            scan_dictionary = {}
+            for bbc_index, spectrum in enumerate(scan_single.spectr_bbc_final):
+                scan_single[f"bbc_{bbc_index+1}"] = spectrum.tolist()
+            dictionaries.append(scan_dictionary)
+        with open(filename, "w") as json_file:
+            json.dump(dictionaries, json_file, indent=4)
