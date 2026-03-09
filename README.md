@@ -30,9 +30,6 @@ NCU SALSA is engineered to solve the "Python Bottleneck" in radio astronomy data
 * **Horner's Method:** Polynomials for Van Vleck corrections are evaluated using nested multiplications to minimize floating-point operations.
 
 ## 🛠 Installation
-
-Manage dependencies and environments efficiently using [uv](https://github.com/astral-sh/uv):
-
 ```bash
 git clone https://github.com/dachshund-ncu/ncu-salsa-rt4.git
 cd ncu-salsa-rt4
