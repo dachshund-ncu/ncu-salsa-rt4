@@ -6,7 +6,6 @@ Owner: Michał Durjasz (md@astro.umk.pl)
 This file is part of the NCU-SALSA-RT4 package
 """
 
-# -- import block --
 from numpy import exp, int64, sin, cos, asarray, sqrt, mean, pi, radians, zeros, inf, complex128, linspace
 from numpy.fft import fft
 from math import copysign
@@ -467,7 +466,7 @@ class Scan:
             observatory_lattitude: float,
             observatory_longitude: float,
             observatory_height_m_asl: float) -> None:
-        # -- barycentric velocity of the observatory --
+        # -- barycentric velocity of the observatory (variable with time) --
         # NOTE: we use nominal coordinates here, because barycorrpy performs precession on its own
         bar = barycorrpy.get_BC_vel(
             self.time_of_observation,
@@ -479,6 +478,7 @@ class Scan:
             epoch=2000)
         self.baryvel = bar[0][0] / 1000.0
         # -- velocity in the local standard of the rest - projected into the observation direction --
+        # (depedent only on the observation direction)
         self.lsrvel = self.__lsr_motion(source_ra_now_deg, source_dec_now_deg, self.decimalyear)
         # -- final velocity for doppler shift calculation --
         self.Vdop = self.baryvel + self.lsrvel

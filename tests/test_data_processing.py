@@ -7,17 +7,21 @@ from .data import data_archives
 
 
 def test_data_accuracy() -> None:
-    """
-    This util simply compares old implementation of the utils (used in simpleSingleDishDataReductor
-    and the new, optimized one used here. Both should return approx same results
-    """
-
     for archive in data_archives:
         print(f"---> Archive: {os.path.basename(archive)}")
-        # load data from archive
-        scan_set_old = ScanSet(archive_filename=archive, on_off=False, debug=False, use_optimized_methods=False, use_multithreaded_utils=False)
-        scan_set_new = ScanSet(archive_filename=archive, on_off=False, debug=False, use_optimized_methods=True)
-
+        # load data from archive (use legacy methods)
+        scan_set_old = ScanSet(
+            archive_filename=archive,
+            on_off=False,
+            debug=False,
+            use_optimized_methods=False,
+            use_multithreaded_utils=False)
+        # load dat from archive (use optimized methods)
+        scan_set_new = ScanSet(
+            archive_filename=archive,
+            on_off=False,
+            debug=False,
+            use_optimized_methods=True)
         # compare scan data
         for scan_old, scan_new in zip(scan_set_old.scans, scan_set_new.scans):
             new_data_full = scan_new.spectr_bbc_final.tolist()
@@ -29,19 +33,28 @@ def test_data_accuracy() -> None:
                     new_data_single_bbc
                 )
 
-
 def test_processing_performance():
     old_timings = []
     for archive in data_archives:
         start_time = time.time()
-        scan_set = ScanSet(archive_filename=archive, on_off=False, debug=False, use_optimized_methods=False, use_multithreaded_utils=False)
+        scan_set = ScanSet(
+            archive_filename=archive,
+            on_off=False,
+            debug=False,
+            use_optimized_methods=False,
+            use_multithreaded_utils=False)
         end_time = time.time()
         old_timings.append(end_time - start_time)
 
     new_timings = []
     for archive in data_archives:
         start_time = time.time()
-        scan_set = ScanSet(archive_filename=archive, on_off=False, debug=False, use_optimized_methods=True, use_multithreaded_utils=True)
+        scan_set = ScanSet(
+            archive_filename=archive,
+            on_off=False,
+            debug=False,
+            use_optimized_methods=True,
+            use_multithreaded_utils=True)
         end_time = time.time()
         new_timings.append(end_time - start_time)
 
