@@ -14,7 +14,6 @@ In digital radio spectroscopy, signals are digitized and quantized (typically 2-
 * **Precision Doppler Engine:**
     * Barycentric velocity correction via `barycorrpy`.
     * Local Standard of Rest (LSR) motion calculation.
-    * Automatic coordinate precession to JNOW (FK5).
 * **Spectroscopic Rotation:** Complex-domain ACF rotation to align spectral lines with target rest frequencies before Fourier Transformation.
 * **Calibration Suite:**
     * $T_{sys}$ (System Temperature) scaling to mK.
