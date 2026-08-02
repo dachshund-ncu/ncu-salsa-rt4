@@ -104,17 +104,21 @@ class FitsSpectrum:
         """
         return {
             "Source name": str(self.sourcename),
-            "V_lsr": str(self.v_lsr),
+            "V_lsr (km/s)": str(self.v_lsr),
             "Molecule": str(self.__molecule),
-            "Frequency": str(self.__restFreq),
-            "Band width": str(self.__freqRang),
-            "Obs. time": str(self.isotime),
+            "Frequency (MHz)": str(self.__restFreq),
+            "Bandwidth (MHz)": str(self.__freqRang),
+            "Obs. time (iso)": str(self.isotime),
             "Obs. time (mjd)": str(self.mjd),
             "Epoch": str(self.__epoch),
             "RA": str(self.__ra),
             "DEC": str(self.__dec),
             "AZ": str(self.__azimuth_angle),
-            "Z": str(self.__zenital_distance)
+            "Z": str(self.__zenital_distance),
+            "RMS I": str(round(self.rmsIhc, 3)),
+            "RMS V": str(round(self.rmsVhc, 3)),
+            "RMS LHC": str(round(self.rmsLhc, 3)),
+            "RMS RHC": str(round(self.rmsRhc, 3))
         }
 
 
