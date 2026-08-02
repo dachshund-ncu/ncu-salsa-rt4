@@ -16,7 +16,8 @@ dependencies = [
     "pandas",
     "fitsio",
     "pandas-stubs",
-    "astropy"
+    "astropy",
+    "Werkzeug"
 ]
 [build-system]
 requires = ["setuptools>=61.0"]

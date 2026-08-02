@@ -8,42 +8,60 @@ import numpy as np
 from astropy.time import Time
 import pandas as pd
 import copy
-
+from typing import BinaryIO, Any
+from werkzeug.datastructures import FileStorage
+import tempfile
 
 class FitsSpectrum:
     def __init__(
             self,
-            filename: str):
+            fits_input: str | BinaryIO | FileStorage):
         """
         initializes the class instance
         """
-        self.filename = filename
-        self.read_data_from_header(self.__read_data_header(filename))
+        self.fits_input: str = self._preprocess_input(fits_input)
+        self.read_data_from_header(self.__read_data_header(self.fits_input))
 
-    def __read_data_header(self, filename):
+    def _preprocess_input(self, fits_input: str | BinaryIO | FileStorage) -> str:
+        if isinstance(fits_input, str):
+            return fits_input
+        # -- handle data stream file (create temporary file) --
+        if hasattr(fits_input, "stream"):
+            fits_input = fits_input.stream
+        if hasattr(fits_input, "read"):
+            fits_input.seek(0)
+            self._tmp_file = tempfile.NamedTemporaryFile(delete=True, suffix=".fits")
+            self._tmp_file.write(fits_input.read())
+            self._tmp_file.flush()
+            fits_path = self._tmp_file.name
+        else:
+            raise TypeError(f"Provided data type ({type(fits_input)}) is not supported!")
+        return fits_path
+
+    def __read_data_header(self, filename: str) -> Any:
         """
         reads and returns data header
         """
         return fits.FITS(filename)[1]
 
-    def read_data_from_header(self, data_section_of_fits_file):
+    def read_data_from_header(self, data_section_of_fits_file: Any):
         """
         reads data from FITS file header
         assumes, that data header was read before
         """
         header = data_section_of_fits_file.read_header()
-        self.lhcTab, self.rhcTab = self.__read_pol_data(data_section_of_fits_file.read())
+        self.lhc_tab, self.rhc_tab = self.__read_pol_data(data_section_of_fits_file.read())
         # --- reading key values ---
         self.sourcename = header['OBJECT']
         # -- DOPPLER TRACKING --
-        self.Vlsr = header['VSYS']  # systemic velocity
+        self.v_lsr = header['VSYS']  # systemic velocity
         self.__freqRang = header['FRQ_RANG']  # frequency range
         self.__restFreq = header['FREQ'] / 1000000.0  # rest frequency (in FITS file it is in Hz, we convert it to MHz)
 
         try:  # TSYS
             self.__tsys1 = header['TSYS1']
             self.__tsys2 = header['TSYS2']
-        except:
+        except KeyError:
             self.__tsys1 = header['TSYS']
             self.__tsys2 = header['TSYS']
         self.tsys = np.mean([self.__tsys1, self.__tsys2])
@@ -59,14 +77,14 @@ class FitsSpectrum:
         del t  # to save memory
 
         # -- IV STOKES PARAMS --
-        self.iTab, self.vTab = self.__make_iv_tabs(self.lhcTab, self.rhcTab)
+        self.i_tab, self.v_tab = self.__make_iv_tabs(self.lhc_tab, self.rhc_tab)
         # -- RMS --
-        self.rmsLhc = self.__calculate_rms(self.lhcTab, [25, 300], [-300, -25])
-        self.rmsRhc = self.__calculate_rms(self.rhcTab, [25, 300], [-300, -25])
-        self.rmsIhc = self.__calculate_rms(self.iTab, [25, 300], [-300, -25])
-        self.rmsVhc = self.__calculate_rms(self.vTab, [25, 300], [-300, -25])
+        self.rmsLhc = self.__calculate_rms(self.lhc_tab, [25, 300], [-300, -25])
+        self.rmsRhc = self.__calculate_rms(self.rhc_tab, [25, 300], [-300, -25])
+        self.rmsIhc = self.__calculate_rms(self.i_tab, [25, 300], [-300, -25])
+        self.rmsVhc = self.__calculate_rms(self.v_tab, [25, 300], [-300, -25])
         # -- doppler tracking --
-        self.velocityTable = self.__generate_velocity_tab(self.Vlsr, self.__dopp_vto, self.__restFreq, self.__freqRang)
+        self.velocity_table = self.__generate_velocity_tab(self.v_lsr, self.__dopp_vto, self.__restFreq, self.__freqRang)
 
         # -- coordinates --
         self.__epoch = header["EQUINOX"]
@@ -86,7 +104,7 @@ class FitsSpectrum:
         """
         return {
             "Source name": str(self.sourcename),
-            "V_lsr": str(self.Vlsr),
+            "V_lsr": str(self.v_lsr),
             "Molecule": str(self.__molecule),
             "Frequency": str(self.__restFreq),
             "Band width": str(self.__freqRang),
@@ -116,7 +134,7 @@ class FitsSpectrum:
         f_centr = rest_freq * (gamma * (1.0 - beta))
         f_beg = f_centr - (freq_rang / 2.0)
         # --
-        freqs: np.ndarray = np.linspace(f_beg, f_beg + freq_rang, len(self.lhcTab))
+        freqs: np.ndarray = np.linspace(f_beg, f_beg + freq_rang, len(self.lhc_tab))
         vels = -c * ((freqs / rest_freq) - 1.0)
         # --
         vels: np.ndarray = vels[::-1]
@@ -150,16 +168,13 @@ class FitsSpectrum:
         :param header: a header with spectral data
         :return: lhc and rhc tables
         """
-        self.lhcTab = np.asarray(header['Pol 1'])[::-1]
-        self.rhcTab = np.asarray(header['Pol 2'])[::-1]
-        self.lhcTab[0:25] = 0.0
-        self.lhcTab[-25:] = 0.0
-        self.rhcTab[0:25] = 0.0
-        self.rhcTab[-25:] = 0.0
-
-        self.rhcTab[-1] = 0.0
-        self.lhcTab[-1] = 0.0
-        return self.lhcTab, self.rhcTab
+        lhc_tab = np.asarray(header['Pol 1'])[::-1]
+        rhc_tab = np.asarray(header['Pol 2'])[::-1]
+        lhc_tab[0:25] = 0.0
+        lhc_tab[-25:] = 0.0
+        rhc_tab[0:25] = 0.0
+        rhc_tab[-25:] = 0.0
+        return lhc_tab, rhc_tab
 
     def __make_iv_tabs(self, lhc_tab: np.ndarray, rhc_tab: np.ndarray):
         """
@@ -173,20 +188,20 @@ class FitsSpectrum:
         """
         returns a pandas dataframe with this spectrum
         """
-        return pd.DataFrame(np.column_stack((self.velocityTable, self.iTab, self.lhcTab, self.rhcTab, self.vTab)),
+        return pd.DataFrame(np.column_stack((self.velocity_table, self.i_tab, self.lhc_tab, self.rhc_tab, self.v_tab)),
                             columns=["Velocity", "I", "LHC", "RHC", "V"])
 
     def get_integrated_flux_density(self, min_chan: int, max_chan: int) -> np.ndarray:
         """
         Returns the integrated flux density of the obs, based on min and max channels
         """
-        channels = np.asarray(range(1, len(self.iTab) + 1))
+        channels = np.asarray(range(1, len(self.i_tab) + 1))
         indices = np.logical_and(channels > min_chan, channels < max_chan)
-        velocity = self.velocityTable[indices]
-        i_integrated = np.trapezoid(self.iTab[indices], velocity)
-        v_integrated = np.trapezoid(self.vTab[indices], velocity)
-        lhc_integrated = np.trapezoid(self.lhcTab[indices], velocity)
-        rhc_integrated = np.trapezoid(self.rhcTab[indices], velocity)
+        velocity = self.velocity_table[indices]
+        i_integrated = np.trapezoid(self.i_tab[indices], velocity)
+        v_integrated = np.trapezoid(self.v_tab[indices], velocity)
+        lhc_integrated = np.trapezoid(self.lhc_tab[indices], velocity)
+        rhc_integrated = np.trapezoid(self.rhc_tab[indices], velocity)
         return np.asarray([self.mjd, i_integrated, v_integrated, lhc_integrated, rhc_integrated])
 
     def make_slice(self, indices: np.ndarray):
@@ -195,15 +210,17 @@ class FitsSpectrum:
         """
         new_slice = copy.deepcopy(self)
         # slice the arrays
-        new_slice.iTab = new_slice.iTab[indices]
-        new_slice.vTab = new_slice.vTab[indices]
-        new_slice.lhcTab = new_slice.lhcTab[indices]
-        new_slice.rhcTab = new_slice.rhcTab[indices]
-        new_slice.velocityTable = new_slice.velocityTable[indices]
+        new_slice.i_tab = new_slice.i_tab[indices]
+        new_slice.v_tab = new_slice.v_tab[indices]
+        new_slice.lhc_tab = new_slice.lhc_tab[indices]
+        new_slice.rhc_tab = new_slice.rhc_tab[indices]
+        new_slice.velocity_table = new_slice.velocity_table[indices]
         return new_slice
 
     def __str__(self):
         return repr(self.mjd)
 
-
+    def __del__(self):
+        if getattr(self, "_tmp_file", None) is not None:
+            self._tmp_file.close()
 

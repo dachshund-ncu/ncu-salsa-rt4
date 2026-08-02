@@ -60,17 +60,17 @@ class SetOfFitsSpectra:
         """
         if len(self.spectra) == 0:
             return np.ndarray([])
-        z_array = np.empty((len(self.spectra[0].iTab), len(self.spectra)))
+        z_array = np.empty((len(self.spectra[0].i_tab), len(self.spectra)))
         # -- iterating to get the data --
         for i in range(len(self.spectra)):
             if pol == 'V':
-                z_array[:, i] = self.spectra[i].vTab
+                z_array[:, i] = self.spectra[i].v_tab
             elif pol == 'LHC':
-                z_array[:, i] = self.spectra[i].lhcTab
+                z_array[:, i] = self.spectra[i].lhc_tab
             elif pol == 'RHC':
-                z_array[:, i] = self.spectra[i].rhcTab
+                z_array[:, i] = self.spectra[i].rhc_tab
             else:
-                z_array[:, i] = self.spectra[i].iTab
+                z_array[:, i] = self.spectra[i].i_tab
         return z_array
 
     def get_vel_array(self):
@@ -80,7 +80,7 @@ class SetOfFitsSpectra:
         if len(self.spectra) == 0:
             raise BufferError("No data loaded!")
         else:
-            return self.spectra[0].velocityTable
+            return self.spectra[0].velocity_table
 
     def get_mjd_array(self):
         """
@@ -96,10 +96,10 @@ class SetOfFitsSpectra:
         Returns the mean spectrum as a data frame
         """
         velocity = self.get_vel_array()
-        i_mean = np.mean(np.asarray([sp.iTab for sp in self.spectra]), axis=0)
-        v_mean = np.mean(np.asarray([sp.vTab for sp in self.spectra]), axis=0)
-        lhc_mean = np.mean(np.asarray([sp.lhcTab for sp in self.spectra]), axis=0)
-        rhc_mean = np.mean(np.asarray([sp.rhcTab for sp in self.spectra]), axis=0)
+        i_mean = np.mean(np.asarray([sp.i_tab for sp in self.spectra]), axis=0)
+        v_mean = np.mean(np.asarray([sp.v_tab for sp in self.spectra]), axis=0)
+        lhc_mean = np.mean(np.asarray([sp.lhc_tab for sp in self.spectra]), axis=0)
+        rhc_mean = np.mean(np.asarray([sp.rhc_tab for sp in self.spectra]), axis=0)
         return pd.DataFrame(
             np.column_stack(
                 (
@@ -163,10 +163,10 @@ class SetOfFitsSpectra:
             channel = self._get_channel_for_velocity(veltab, velocity)
         # extract the data
         mjd_table = self.get_mjd_array()
-        i_table = np.asarray([sp.iTab[channel] for sp in self.spectra])
-        v_table = np.asarray([sp.vTab[channel] for sp in self.spectra])
-        lhc_table = np.asarray([sp.lhcTab[channel] for sp in self.spectra])
-        rhc_table = np.asarray([sp.rhcTab[channel] for sp in self.spectra])
+        i_table = np.asarray([sp.i_tab[channel] for sp in self.spectra])
+        v_table = np.asarray([sp.v_tab[channel] for sp in self.spectra])
+        lhc_table = np.asarray([sp.lhc_tab[channel] for sp in self.spectra])
+        rhc_table = np.asarray([sp.rhc_tab[channel] for sp in self.spectra])
         htop = np.column_stack((mjd_table, i_table, v_table, lhc_table, rhc_table))
         if not df:
             return htop
