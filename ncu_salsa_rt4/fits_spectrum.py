@@ -11,6 +11,7 @@ import copy
 from typing import BinaryIO, Any
 from werkzeug.datastructures import FileStorage
 import tempfile
+import os
 
 class FitsSpectrum:
     def __init__(
@@ -19,8 +20,20 @@ class FitsSpectrum:
         """
         initializes the class instance
         """
+        self.fits_original_fname = self._get_original_filename(fits_input)
         self.fits_input: str = self._preprocess_input(fits_input)
         self.read_data_from_header(self.__read_data_header(self.fits_input))
+
+    def _get_original_filename(self, fits_input: str | BinaryIO | FileStorage) -> str:
+        if hasattr(fits_input, "filename") and fits_input.filename:
+            fits_file_name = os.path.basename(fits_input.filename)
+        elif isinstance(fits_input, str):
+            fits_file_name = os.path.basename(fits_input)
+        elif hasattr(fits_input, "name") and isinstance(fits_input.name, str):  # Standardowy file object
+            fits_file_name = os.path.basename(fits_input.name)
+        else:
+            fits_file_name = "spectrum.fits"
+        return fits_file_name
 
     def _preprocess_input(self, fits_input: str | BinaryIO | FileStorage) -> str:
         if isinstance(fits_input, str):
