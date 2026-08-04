@@ -1,7 +1,7 @@
 import os
 import pytest
 import time
-from ncu_salsa_rt4 import FitsSpectrum, SetOfFitsSpectra
+from ncu_salsa_rt4 import FitsSpectrum, FitsCube
 from .data import fits_files, fits_files_directory
 import glob
 import io
@@ -43,7 +43,7 @@ def test_content_loading() -> None:
 
 def test_check_data_sorting() -> None:
     # load data
-    set_of_spec = SetOfFitsSpectra(
+    set_of_spec = FitsCube(
         cat_with_source=fits_files_directory
     )
     # check if data is sorted properly
@@ -54,7 +54,7 @@ def test_check_data_sorting() -> None:
 
 def test_data_flagging() -> None:
     # load data
-    set_of_spec = SetOfFitsSpectra(
+    set_of_spec = FitsCube(
         cat_with_source=fits_files_directory
     )
     flagged_filename = "g32p74_61097242.fits"
@@ -117,6 +117,44 @@ def test_flask_filestorage_loading() -> None:
             assert og_header[key] == flask_header[key]
             assert og_header[key] == stream_header[key]
 
+def test_cube_loading() -> None:
+    cube = FitsCube(fits_files=fits_files)
+    assert len(cube.spectra) == len(fits_files)
+
+def test_cube_loading_data_stream() -> None:
+    files_binary = []
+    for fits_file_filename in fits_files:
+        with open(fits_file_filename, "rb") as f:
+            files_binary.append(io.BytesIO(f.read()))
+
+    cube = FitsCube(fits_files=files_binary)
+    cube_og = FitsCube(fits_files=fits_files)
+    assert len(cube.spectra) == len(files_binary)
+    for spectrum_og, spectrum_stream in zip(cube_og.spectra, cube.spectra):
+        assert len(spectrum_og.lhc_tab) == len(spectrum_stream.lhc_tab)
+        assert len(spectrum_og.rhc_tab) == len(spectrum_stream.rhc_tab)
+        assert len(spectrum_og.i_tab) == len(spectrum_stream.i_tab)
+        assert len(spectrum_og.v_tab) == len(spectrum_stream.v_tab)
+
+def test_cube_loading_flask() -> None:
+    files_flask = []
+    for fits_file_filename in fits_files:
+        with open(fits_file_filename, "rb") as f:
+            files_flask.append(FileStorage(
+                stream=io.BytesIO(f.read()),
+                filename=os.path.basename(fits_file_filename),
+                content_type="application/fits",
+            )
+        )
+    cube_flask = FitsCube(fits_files=files_flask)
+    cube_og = FitsCube(fits_files=fits_files)
+    assert len(cube_flask.spectra) == len(files_flask)
+    for spectrum_og, spectrum_stream in zip(cube_og.spectra, cube_flask.spectra):
+        assert len(spectrum_og.lhc_tab) == len(spectrum_stream.lhc_tab)
+        assert len(spectrum_og.rhc_tab) == len(spectrum_stream.rhc_tab)
+        assert len(spectrum_og.i_tab) == len(spectrum_stream.i_tab)
+        assert len(spectrum_og.v_tab) == len(spectrum_stream.v_tab)
+
 
 if __name__ == "__main__":
     test_header_loading()
@@ -124,3 +162,6 @@ if __name__ == "__main__":
     test_check_data_sorting()
     test_data_flagging()
     test_flask_filestorage_loading()
+    test_cube_loading()
+    test_cube_loading_data_stream()
+    test_cube_loading_flask()

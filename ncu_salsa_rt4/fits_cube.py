@@ -1,4 +1,8 @@
-from typing import Literal
+from sys import flags
+from typing import Literal, BinaryIO, Any
+
+from numpy import dtype, ndarray
+from werkzeug.datastructures import FileStorage
 
 from ncu_salsa_rt4.fits_spectrum import FitsSpectrum
 import numpy as np
@@ -7,27 +11,45 @@ from operator import attrgetter
 import glob
 import pandas as pd
 
-class SetOfFitsSpectra:
-    def __init__(self, cat_with_source: str, load_on_creation=True):
+class FitsCube:
+    def __init__(
+            self,
+            cat_with_source: str = ".",
+            fits_files: list[str | BinaryIO | FileStorage] | None = None,
+            load_on_creation=True):
         """
         initializes the class
         """
+
         self.data_catalog = cat_with_source
-        if load_on_creation:
-            self.flagged_obs = self.__read_flagged_obs(self.data_catalog)
+        self.flagged_obs = self.__read_flagged_obs(self.data_catalog)
+        if fits_files is not None:
+            self.spectra = self.__load_spectra_from_list(fits_files)
+        else:
             self.spectra = self.__load_spectra_from_cat(self.data_catalog)
-            self._sort_data()
+        self._sort_data()
+
+    def __load_spectra_from_list(self, fits_files_repr: list[str | BinaryIO | FileStorage]) -> list[FitsSpectrum]:
+        """
+        Loads .fits files from a files given in a list
+        :param fits_files: array of .fits files
+        :return: list of FitsSpectrum
+        """
+        fits_files = []
+        for fle_representation in fits_files_repr:
+            if isinstance(fle_representation, str):
+                if os.path.basename(fle_representation) not in self.flagged_obs:
+                    fits_files.append(fle_representation)
+            else:
+                fits_files.append(fle_representation)
+        return [FitsSpectrum(fitsFileName) for no, fitsFileName in enumerate(fits_files)]
 
     def __load_spectra_from_cat(self, cat_with_source: str) -> list[FitsSpectrum]:
         """
-        loads all the .FITS files from given directory
+        Loads all the .FITS files from given directory
         """
         fits_filenames = glob.glob(os.path.join(cat_with_source, "*.[fF][iI][tT][sS]"))
-        fits_files = []
-        for filename in fits_filenames:
-            if os.path.basename(filename) not in self.flagged_obs:
-                fits_files.append(filename)
-        return [FitsSpectrum(fitsFileName) for no, fitsFileName in enumerate(fits_files)]
+        return self.__load_spectra_from_list(fits_filenames)
 
     def _sort_data(self):
         """
@@ -35,14 +57,16 @@ class SetOfFitsSpectra:
         """
         self.spectra.sort(key=attrgetter('mjd'), reverse=False)
 
-    def __read_flagged_obs(self, directory: str) -> np.ndarray:
+    def __read_flagged_obs(self, directory: str = ".") -> np.ndarray:
         """
         Reads the flagged filenames
         """
+        filepath = os.path.join(directory, "flagged_obs.dat")
         try:
-            return np.loadtxt(os.path.join(directory, 'flagged_obs.dat'), dtype=str)
-        except FileNotFoundError:
-            return np.asarray([])
+            return np.loadtxt(filepath, dtype=str, ndmin=1)
+        except (FileNotFoundError, ValueError):
+            return np.array([], dtype=str)
+
 
     def __str__(self):
         if len(self.spectra) > 0:
@@ -139,7 +163,7 @@ class SetOfFitsSpectra:
             velocities[0], velocities[1] = velocities[1], velocities[0]
 
         # -- create new SetOfFitsSpectra --
-        new_slice = SetOfFitsSpectra(self.data_catalog, load_on_creation=False)
+        new_slice = FitsCube(self.data_catalog, load_on_creation=False)
         new_slice.flagged_obs = self.flagged_obs
 
         # -- populate new objects with sliced spectra --
