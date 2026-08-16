@@ -15,12 +15,11 @@ class FitsCube:
     def __init__(
             self,
             cat_with_source: str = ".",
-            fits_files: list[str | BinaryIO | FileStorage] | None = None,
-            load_on_creation=True):
+            fits_files: list[str | BinaryIO | FileStorage] | None = None
+    ) -> None:
         """
         initializes the class
         """
-
         self.data_catalog = cat_with_source
         self.flagged_obs = self.__read_flagged_obs(self.data_catalog)
         if fits_files is not None:
@@ -186,16 +185,46 @@ class FitsCube:
         else:
             channel = self._get_channel_for_velocity(veltab, velocity)
         # extract the data
+        # epochs
         mjd_table = self.get_mjd_array()
+        # stokes
         i_table = np.asarray([sp.i_tab[channel] for sp in self.spectra])
         v_table = np.asarray([sp.v_tab[channel] for sp in self.spectra])
         lhc_table = np.asarray([sp.lhc_tab[channel] for sp in self.spectra])
         rhc_table = np.asarray([sp.rhc_tab[channel] for sp in self.spectra])
-        htop = np.column_stack((mjd_table, i_table, v_table, lhc_table, rhc_table))
+        # rms
+        i_table_rms = np.asarray([sp.rmsIhc for sp in self.spectra])
+        v_table_rms = np.asarray([sp.rmsVhc for sp in self.spectra])
+        lhc_table_rms = np.asarray([sp.rmsLhc for sp in self.spectra])
+        rhc_table_rms = np.asarray([sp.rmsRhc for sp in self.spectra])
+        htop = np.column_stack((
+            mjd_table,
+            i_table,
+            i_table_rms,
+            v_table,
+            v_table_rms,
+            lhc_table,
+            lhc_table_rms,
+            rhc_table,
+            rhc_table_rms
+        ))
         if not df:
             return htop
         else:
-            return pd.DataFrame(htop, columns=["MJD", "I", "V", "LHC", "RHC"])
+            return pd.DataFrame(
+                htop,
+                columns=[
+                    "MJD",
+                    "I",
+                    "I_rms",
+                    "V",
+                    "V_rms",
+                    "LHC",
+                    "LHC_rms",
+                    "RHC",
+                    "RHC_rms"
+                ]
+            )
 
     def _get_channel_for_velocity(self, veltab: np.ndarray, velocity: float) -> int:
         """Finds the nearest channel for the given velocity."""

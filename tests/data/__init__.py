@@ -13,3 +13,6 @@ fits_files = sorted(
     glob.glob(os.path.join(fits_files_directory, "*.fits"))
 )
 
+fits_files_cepa = sorted(
+    glob.glob(os.path.join(fits_files_directory, "cepa*.fits"))
+)
